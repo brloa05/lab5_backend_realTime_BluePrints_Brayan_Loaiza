@@ -1,7 +1,44 @@
-# Laboratorio #4 – REST API Blueprints
+# Lab #5 – BluePrints en Tiempo Real (STOMP + WebSocket)
 ## Escuela Colombiana de Ingeniería – Arquitecturas de Software
 **Estudiante:** Brayan Loaiza  
-**Repositorio:** https://github.com/brloa05/Lab_P1_BluePrints_Java21_API_brayan_loaiza
+**Backend:** https://github.com/brloa05/lab5_backend_realTime_BluePrints_Brayan_Loaiza  
+**Frontend:** https://github.com/brloa05/Lab_P4_BluePrints_RealTime-Sokets_brayanLoaiza
+
+---
+
+## Objetivo
+
+Extender la API REST de blueprints (Lab #4) con soporte de **colaboración en tiempo real** usando **STOMP sobre WebSocket** (Spring Boot), permitiendo que múltiples clientes dibujen el mismo plano de forma simultánea.
+
+---
+
+## Arquitectura
+
+```
+React (Vite) — Frontend
+ │
+ ├── HTTP REST  ──────────────────────> Spring Boot :8080
+ │    GET /api/blueprints/{a}/{n}        (estado inicial del plano)
+ │    POST/PUT/DELETE /api/blueprints    (CRUD)
+ │
+ └── WebSocket / STOMP ───────────────> Spring Boot :8080/ws-blueprints
+      Publica:   /app/draw              (envía nuevo punto)
+      Suscribe:  /topic/blueprints.{author}.{name}  (recibe actualizaciones)
+```
+
+```
+src/main/java/edu/eci/arsw/blueprints
+  ├── model/        → Blueprint, Point, DrawEvent, BlueprintUpdate
+  ├── persistence/  → BlueprintPersistence
+  │    ├── InMemoryBlueprintPersistence  (perfil: !postgres)
+  │    ├── PostgresBlueprintPersistence  (perfil: postgres)
+  │    └── BlueprintJpaRepository
+  ├── services/     → BlueprintsServices
+  ├── filters/      → IdentityFilter / RedundancyFilter / UndersamplingFilter
+  ├── controllers/  → BlueprintsAPIController (REST)
+  │                   StompBlueprintController (WebSocket)
+  └── config/       → WebSocketConfig, OpenApiConfig
+```
 
 ---
 
@@ -9,68 +46,137 @@
 
 - Java 21
 - Maven 3.9+
-- Docker Desktop
+- Node.js 18+ (para el frontend)
+- Docker Desktop (opcional — solo para PostgreSQL)
 
 ---
 
-## Ejecución del proyecto
+## Puesta en marcha
 
-### Con persistencia en memoria (por defecto)
+### 1. Backend
+
+**Con persistencia en memoria (por defecto):**
 ```bash
-mvn clean install
 mvn spring-boot:run
 ```
 
-### Con persistencia en PostgreSQL
+**Con persistencia en PostgreSQL:**
 ```bash
-# 1. Levantar la base de datos
 docker compose up -d
-
-# 2. Ejecutar la app con perfil postgres
 mvn spring-boot:run "-Dspring-boot.run.profiles=postgres"
 ```
 
-### Con filtros de puntos
+### 2. Frontend
+
 ```bash
-# RedundancyFilter: elimina puntos duplicados consecutivos
-mvn spring-boot:run "-Dspring-boot.run.profiles=postgres,redundancy"
+cd Lab_P4_BluePrints_RealTime_brayanLoaiza
+npm install
+npm run dev
+# http://localhost:5173
+```
 
-# UndersamplingFilter: conserva 1 de cada 2 puntos
-mvn spring-boot:run "-Dspring-boot.run.profiles=postgres,undersampling"
+### 3. Probar colaboración
+
+1. Abrir `http://localhost:5173` en dos pestañas
+2. En ambas escribir el mismo `autor` y `plano` (ej: `john` / `house`)
+3. Esperar ~600ms para que se conecte automáticamente
+4. Dibujar en una pestaña — los trazos aparecen en la otra en tiempo real
+
+---
+
+## API REST
+
+Ruta base: `/api/blueprints`  
+CORS habilitado para todos los orígenes en desarrollo.
+
+| Método | Ruta | Descripción | Código |
+|--------|------|-------------|--------|
+| GET | `/api/blueprints` | Todos los blueprints | 200 |
+| GET | `/api/blueprints?author={a}` | Blueprints por autor | 200, 404 |
+| GET | `/api/blueprints/{author}/{name}` | Blueprint específico | 200, 404 |
+| POST | `/api/blueprints` | Crear blueprint | 201, 409 |
+| PUT | `/api/blueprints/{author}/{name}` | Reemplazar puntos | 200, 404 |
+| DELETE | `/api/blueprints/{author}/{name}` | Eliminar blueprint | 204, 404 |
+
+### Ejemplos (PowerShell)
+
+```powershell
+# Obtener blueprint
+Invoke-RestMethod http://localhost:8080/api/blueprints/john/house
+
+# Crear blueprint
+Invoke-RestMethod http://localhost:8080/api/blueprints `
+  -Method Post -ContentType 'application/json' `
+  -Body '{"author":"john","name":"test","points":[{"x":0,"y":0}]}'
+
+# Reemplazar puntos
+Invoke-RestMethod http://localhost:8080/api/blueprints/john/test `
+  -Method Put -ContentType 'application/json' `
+  -Body '{"points":[{"x":10,"y":10},{"x":50,"y":50}]}'
+
+# Eliminar blueprint
+Invoke-RestMethod http://localhost:8080/api/blueprints/john/test -Method Delete
 ```
 
 ---
 
-## Arquitectura
+## Protocolo STOMP (Tiempo Real)
 
-El proyecto sigue una arquitectura estrictamente por capas:
+**Endpoint WebSocket:** `ws://localhost:8080/ws-blueprints`
+
+### Publicar un punto (cliente → servidor)
+
+**Destino:** `/app/draw`  
+**Body:**
+```json
+{ "author": "john", "name": "house", "point": { "x": 120, "y": 80 } }
+```
+
+### Recibir actualización (servidor → clientes)
+
+**Topic:** `/topic/blueprints.{author}.{name}`  
+**Body:**
+```json
+{ "author": "john", "name": "house", "points": [{"x":0,"y":0}, {"x":120,"y":80}] }
+```
+
+> El servidor hace broadcast de la **lista completa** de puntos acumulados en cada evento, no solo el punto nuevo. Esto garantiza que todos los clientes tengan el mismo estado sin importar cuándo se conectaron.
+
+### Flujo completo
 
 ```
-Controller → Service → Persistence
-                ↓
-             Filter  (solo en GET /{author}/{bpname})
-```
-
-```
-src/main/java/edu/eci/arsw/blueprints
-  ├── model/        → Blueprint, Point, ApiResponse<T>
-  ├── persistence/  → Interfaz BlueprintPersistence
-  │    ├── InMemoryBlueprintPersistence  (perfil: !postgres)
-  │    ├── PostgresBlueprintPersistence  (perfil: postgres)
-  │    └── BlueprintJpaRepository        (Spring Data JPA)
-  ├── services/     → BlueprintsServices (orquestación)
-  ├── filters/      → IdentityFilter / RedundancyFilter / UndersamplingFilter
-  ├── controllers/  → BlueprintsAPIController
-  └── config/       → OpenApiConfig
+Cliente A                    Servidor                    Cliente B
+   │                            │                            │
+   │── GET /api/blueprints ────>│                            │
+   │<── { points: [...] } ──────│                            │
+   │                            │<── subscribe /topic/... ──│
+   │── subscribe /topic/... ───>│                            │
+   │                            │                            │
+   │── publish /app/draw ──────>│                            │
+   │                            │── addPoint() ─────────────│
+   │                            │── broadcast /topic/... ──>│
+   │<── blueprint-update ───────│                            │
+   │                            │                            │
 ```
 
 ---
 
-## Configuración PostgreSQL
+## Datos de prueba (en memoria)
 
-La base de datos se levanta con Docker usando `docker-compose.yml`:
+Al arrancar sin perfil `postgres`, la app carga estos blueprints automáticamente:
+
+| Autor | Plano   | Puntos |
+|-------|---------|--------|
+| john  | house   | 4      |
+| john  | garage  | 3      |
+| jane  | garden  | 3      |
+
+---
+
+## Configuración PostgreSQL (opcional)
 
 ```yaml
+# docker-compose.yml
 services:
   postgres:
     image: postgres:16
@@ -82,215 +188,13 @@ services:
       - "5432:5432"
 ```
 
-Hibernate crea las tablas automáticamente con `ddl-auto=update`:
-
-- **blueprints** — almacena autor, nombre e id autogenerado
-- **blueprint_points** — almacena los puntos asociados a cada blueprint
-
 ---
 
-## API REST
+## Decisiones técnicas
 
-Ruta base: `/api/v1/blueprints`
-
-Todas las respuestas usan el wrapper `ApiResponse<T>`:
-
-```json
-{
-  "code": 200,
-  "message": "execute ok",
-  "data": { ... }
-}
-```
-
-### Endpoints
-
-| Método | Ruta | Descripción | Códigos HTTP |
-|--------|------|-------------|--------------|
-| GET | `/api/v1/blueprints` | Obtener todos los blueprints | 200 |
-| GET | `/api/v1/blueprints/{author}` | Blueprints por autor | 200, 404 |
-| GET | `/api/v1/blueprints/{author}/{bpname}` | Blueprint específico (aplica filtro) | 200, 404 |
-| POST | `/api/v1/blueprints` | Crear blueprint | 201, 400, 403 |
-| PUT | `/api/v1/blueprints/{author}/{bpname}/points` | Agregar punto | 202, 404 |
-
-### Ejemplos de uso (PowerShell)
-
-```powershell
-# Obtener todos
-Invoke-RestMethod http://localhost:8080/api/v1/blueprints
-
-# Obtener por autor
-Invoke-RestMethod http://localhost:8080/api/v1/blueprints/john
-
-# Obtener blueprint específico
-Invoke-RestMethod http://localhost:8080/api/v1/blueprints/john/house
-
-# Crear blueprint
-Invoke-RestMethod http://localhost:8080/api/v1/blueprints `
-  -Method Post -ContentType 'application/json' `
-  -Body '{"author":"john","name":"house","points":[{"x":0,"y":0},{"x":10,"y":0}]}'
-
-# Agregar punto
-Invoke-RestMethod http://localhost:8080/api/v1/blueprints/john/house/points `
-  -Method Put -ContentType 'application/json' `
-  -Body '{"x":5,"y":5}'
-```
-
----
-
-## OpenAPI / Swagger
-
-Con la aplicación corriendo, la documentación está disponible en:
-
-- **Swagger UI:** http://localhost:8080/swagger-ui.html
-- **OpenAPI JSON:** http://localhost:8080/v3/api-docs
-
-Todos los endpoints están anotados con `@Operation` y `@ApiResponse` de springdoc-openapi.
-
-### Evidencia Swagger UI
-
-La interfaz expone los 5 endpoints documentados con sus descripciones y métodos HTTP:
-
-![Swagger UI](docs/images/swagger-ui.png)
-
----
-
-## Evidencia base de datos PostgreSQL
-
-Consulta los datos directamente en el contenedor:
-
-```bash
-docker exec -it lab_p1_blueprints_java21_api-postgres-1 psql -U postgres -d blueprints -c "SELECT * FROM blueprints;"
-docker exec -it lab_p1_blueprints_java21_api-postgres-1 psql -U postgres -d blueprints -c "SELECT * FROM blueprint_points;"
-```
-
-Tabla `blueprints` — almacena autor y nombre de cada blueprint:
-
-![Tabla blueprints](docs/images/db-blueprints.png)
-
-Tabla `blueprint_points` — almacena los puntos asociados a cada blueprint por `blueprint_id`:
-
-![Tabla blueprint_points](docs/images/db-points.png)
-
----
-
-## Buenas prácticas aplicadas
-
-### 1. Versionamiento de API
-La ruta base `/api/v1/blueprints` permite evolucionar la API en el futuro (v2, v3) sin romper clientes existentes.
-![img.png](docs/images/versinamientoAPI.png)
-### 2. Wrapper de respuesta uniforme `ApiResponse<T>`
-Todas las respuestas tienen la misma estructura (`code`, `message`, `data`), lo que facilita el manejo en el cliente sin importar el endpoint consultado.
-![img.png](docs/images/respuestasUniform.png)
-### 3. Códigos HTTP semánticos
-| Situación | Código |
-|-----------|--------|
-| Consulta exitosa | 200 OK |
-| Recurso creado | 201 Created |
-| Actualización aceptada | 202 Accepted |
-| Datos inválidos | 400 Bad Request |
-| Recurso duplicado | 403 Forbidden |
-| Recurso no encontrado | 404 Not Found |
-
-### 4. Separación de perfiles de Spring
-Cada implementación de persistencia y filtro está asociada a un perfil de Spring, permitiendo cambiar el comportamiento de la aplicación sin modificar código:
-
-| Perfil | Efecto |
-|--------|--------|
-| *(ninguno)* | Persistencia en memoria, sin filtro |
-| `postgres` | Persistencia en PostgreSQL |
-| `redundancy` | Activa RedundancyFilter |
-| `undersampling` | Activa UndersamplingFilter |
-
-### 5. Filtros de puntos
-Los filtros se aplican únicamente al consultar un blueprint individual (`GET /{author}/{bpname}`), sin afectar los listados. Implementan la interfaz `BlueprintsFilter` y se activan con perfiles de Spring, respetando el principio abierto/cerrado.
-
----
-
-## Criterios de evaluación
-
-| Criterio | Peso |
-|----------|------|
-| Diseño de API (versionamiento, DTOs, ApiResponse) | 25% |
-| Migración a PostgreSQL | 25% |
-| Uso correcto de códigos HTTP y control de errores | 20% |
-| Documentación con OpenAPI/Swagger + README | 15% |
-| Pruebas básicas | 15% |
-
----
-
-## Bonus: Imagen de contenedor con Docker
-
-El proyecto incluye un `Dockerfile` multi-stage que construye y empaqueta la aplicación como imagen de contenedor.
-
-### Construir y ejecutar la imagen
-
-```bash
-# Construir la imagen
-docker build -t blueprints-api .
-
-# Ejecutar solo la API (requiere PostgreSQL corriendo aparte)
-docker run -p 8080:8080 blueprints-api
-
-# Ejecutar API + PostgreSQL juntos con docker compose
-docker compose up -d
-```
-
-### Dockerfile (multi-stage)
-
-```dockerfile
-FROM maven:3.9-eclipse-temurin-21 AS build
-WORKDIR /app
-COPY pom.xml .
-RUN mvn -B dependency:go-offline
-COPY src ./src
-RUN mvn -B -DskipTests package
-
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-COPY --from=build /app/target/*.jar ./app.jar
-EXPOSE 8080
-ENTRYPOINT ["java","-jar","/app/app.jar"]
-```
-
-La imagen de build usa Maven + JDK 21 para compilar, y la imagen final usa solo el JRE 21, reduciendo el tamaño del contenedor resultante.
-
----
-
-## Bonus: Métricas con Spring Boot Actuator
-
-Spring Boot Actuator expone endpoints automáticos para monitorear el estado y las métricas de la aplicación en tiempo real, sin escribir código adicional.
-
-### Endpoints disponibles
-
-| Endpoint | Descripción |
-|----------|-------------|
-| `http://localhost:8080/actuator/health` | Estado de la app y conexión a la BD |
-| `http://localhost:8080/actuator/metrics` | Lista de métricas disponibles (CPU, memoria, HTTP) |
-| `http://localhost:8080/actuator/info` | Información general del proyecto |
-
-### Ejemplo de respuesta `/actuator/health`
-
-```json
-{
-  "status": "UP",
-  "components": {
-    "db": { "status": "UP" },
-    "diskSpace": { "status": "UP" }
-  }
-}
-```
-
-### Ejemplo de respuesta `/actuator/info`
-
-```json
-{
-  "app": {
-    "nombre": "Blueprints REST API",
-    "version": "1.0.0",
-    "descripcion": "API REST para gestion de blueprints - Lab #4 ARSW",
-    "estudiante": "Brayan Loaiza",
-    "tecnologias": "Java 21, Spring Boot 3.3.x, PostgreSQL, Docker"
-  }
-}
-```
+| Decisión | Alternativa descartada | Razón |
+|----------|------------------------|-------|
+| STOMP sobre WebSocket nativo | Socket.IO (Node.js) | Spring Boot ya incluye soporte nativo; evita un servidor Node separado |
+| Broadcast de lista completa | Broadcast solo del punto nuevo | Garantiza consistencia para clientes que se conectan tarde |
+| Debounce 600ms en frontend | Botón "Conectar" | Experiencia más fluida sin UI adicional |
+| Perfil `!postgres` para in-memory | Siempre requirir BD | Tests y demos funcionan sin Docker |
