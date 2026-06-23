@@ -196,6 +196,22 @@ services:
 
 ---
 
+## Comparativa Socket.IO vs STOMP
+
+| | Socket.IO (Node.js) | STOMP (Spring Boot) |
+|--|---------------------|---------------------|
+| **Servidor** | Node.js independiente | Integrado en Spring Boot |
+| **Protocolo** | WebSocket + fallbacks HTTP | WebSocket puro |
+| **Modelo** | Rooms (join-room) | Topics (/topic/...) |
+| **Mensajería** | Eventos personalizados (`draw-event`, `blueprint-update`) | Destinos estándar (`/app/draw`, `/topic/blueprints.*`) |
+| **Integración con Java** | Requiere servidor Node adicional | Nativa, sin dependencias extra |
+| **Escalabilidad** | Redis adapter para múltiples instancias | Spring Cloud + broker externo (RabbitMQ) |
+| **Curva de aprendizaje** | Baja (API simple) | Media (requiere conocer STOMP) |
+
+**Decisión:** se eligió **STOMP** porque el backend ya es Spring Boot, evitando mantener dos servidores. El modelo de tópicos de STOMP es equivalente a las rooms de Socket.IO — ambos aíslan la comunicación por plano usando la clave `blueprints.{author}.{name}`.
+
+---
+
 ## Decisiones técnicas
 
 | Decisión | Alternativa descartada | Razón |
