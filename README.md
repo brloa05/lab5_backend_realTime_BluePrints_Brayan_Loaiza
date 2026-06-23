@@ -6,6 +6,12 @@
 
 ---
 
+## Video de demostración
+
+https://github.com/brloa05/lab5_backend_realTime_BluePrints_Brayan_Loaiza/blob/main/docs/demo.mp4
+
+---
+
 ## Objetivo
 
 Extender la API REST de blueprints (Lab #4) con soporte de **colaboración en tiempo real** usando **STOMP sobre WebSocket** (Spring Boot), permitiendo que múltiples clientes dibujen el mismo plano de forma simultánea.
