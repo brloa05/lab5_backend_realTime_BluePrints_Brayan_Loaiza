@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Repository
@@ -51,5 +52,19 @@ public class PostgresBlueprintPersistence implements BlueprintPersistence {
         Blueprint bp = getBlueprint(author, name);
         bp.addPoint(new Point(x, y));
         repo.save(bp);
+    }
+
+    @Override
+    public void updateBlueprint(String author, String name, List<Point> points) throws BlueprintNotFoundException {
+        Blueprint bp = getBlueprint(author, name);
+        bp.getPoints().clear();
+        bp.getPoints().addAll(points);
+        repo.save(bp);
+    }
+
+    @Override
+    public void deleteBlueprint(String author, String name) throws BlueprintNotFoundException {
+        Blueprint bp = getBlueprint(author, name);
+        repo.delete(bp);
     }
 }

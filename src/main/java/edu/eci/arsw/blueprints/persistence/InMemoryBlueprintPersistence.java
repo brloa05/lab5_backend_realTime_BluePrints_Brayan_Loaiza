@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -63,5 +64,19 @@ public class InMemoryBlueprintPersistence implements BlueprintPersistence {
     public void addPoint(String author, String name, int x, int y) throws BlueprintNotFoundException {
         Blueprint bp = getBlueprint(author, name);
         bp.addPoint(new Point(x, y));
+    }
+
+    @Override
+    public void updateBlueprint(String author, String name, List<Point> points) throws BlueprintNotFoundException {
+        Blueprint bp = getBlueprint(author, name);
+        bp.getPoints().clear();
+        bp.getPoints().addAll(points);
+    }
+
+    @Override
+    public void deleteBlueprint(String author, String name) throws BlueprintNotFoundException {
+        String k = keyOf(author, name);
+        if (!blueprints.containsKey(k)) throw new BlueprintNotFoundException("Blueprint not found: %s/%s".formatted(author, name));
+        blueprints.remove(k);
     }
 }
